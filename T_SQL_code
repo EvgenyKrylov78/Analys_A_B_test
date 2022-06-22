@@ -1,0 +1,101 @@
+-- T-SQL -запрос, возвращающий не агрегированные данные
+ 
+SELECT
+    D.ELS_NKR,
+    CASE
+        WHEN D.ELS_NKR IN (SELECT ELS_NKR FROM messages) AND D.STRATEGY_CODE == 'стратегия' THEN 'message' -- писали
+        WHEN D.ELS_NKR IN (SELECT ELS_NKR FROM calls) AND D.STRATEGY_CODE == 'стратегия' THEN 'call' -- звонили
+        WHEN D.STRATEGY_CODE == 'стратегия' THEN 'strategy_without_call_or_message' -- не звонили и не писали
+        WHEN D.STRATEGY_CODE == 'контрольная группа'
+            AND D.ELS_NKR NOT IN (SELECT ELS_NKR FROM messages)
+            AND D.ELS_NKR NOT IN (SELECT ELS_NKR FROM calls) THEN 'control' -- контрольная группа
+        ELSE 'control_but_call_or_message' -- контрольная группа, но звонили или писали, хотя не должны были
+    END AS STRATEGY_CODE,
+    D.SALDO_OUT,
+    CASE
+        WHEN D.SALDO_OUT BETWEEN 0 AND 1000 THEN '<1000'
+        WHEN D.SALDO_OUT BETWEEN 1000 AND 5000 THEN '1000-5000'
+        WHEN D.SALDO_OUT BETWEEN 5000 AND 15000 THEN '5000-15000'
+        WHEN D.SALDO_OUT BETWEEN 15000 AND 50000 THEN '15000-50000'
+        WHEN D.SALDO_OUT BETWEEN 50000 AND 100000 THEN '50000-100000'
+        WHEN D.SALDO_OUT BETWEEN 100000 AND 500000 THEN '100000-500000'
+        ELSE '>=500000'
+    END AS SALDO_SEGMENT,
+    (D.ELS_NKR IN (SELECT ELS_NKR FROM messages) AND D.SALDO_OUT <= 2)
+        OR (D.ELS_NKR IN (SELECT ELS_NKR FROM calls) AND D.SALDO_OUT <= 10) AS TOO_SMALL_SALDO, -- true, если задолженность меньше, чем цена сообщения или звонка
+    (D.ELS_NKR IN (SELECT ELS_NKR FROM messages) AND P.SUM_OPL <= 2)
+        OR (D.ELS_NKR IN (SELECT ELS_NKR FROM calls) AND P.SUM_OPL <= 10) AS TOO_SMALL_OPL, -- true, если сообщение или звонок не окупились за счет выплаты долга
+    CAST(COALESCE(P.SUM_OPL, 0) AS FLOAT) / CAST(D.SALDO_OUT AS FLOAT) * 100.0 AS RETURNED_DEBT_PERCENTAGE,
+    COALESCE(P.SUM_OPL, 0) AS SUM_OPL,
+    COALESCE(P.COUNT_OPL, 0) AS COUNT_OPL
+FROM debts AS D
+    LEFT JOIN
+    (SELECT ELS_NKR, SUM(SUM_OPL) AS SUM_OPL, COUNT(SUM_OPL) AS COUNT_OPL
+    FROM payments
+    GROUP BY ELS_NKR) AS P ON D.ELS_NKR == P.ELS_NKR;
+ 
+ 
+ 
+ 
+-- данные в группировке по стратегиям
+SELECT
+    STRATEGY_CODE,
+    COUNT(ELS_NKR) AS ELS_NKR_COUNT,
+    COUNT_IF(COUNT_OPL > 0) AS OPL_COUNT,
+    CAST(COUNT_IF(COUNT_OPL > 0) AS FLOAT) / CAST(COUNT(ELS_NKR) AS FLOAT) * 100.0 AS CONVERSION,
+    AVG(SALDO_OUT) AS AVG_SALDO_OUT,
+    AVG(SUM_OPL) AS AVG_SUM_OPL,
+    AVG(COUNT_OPL) AS AVG_COUNT_OPL,
+    SUM(TOO_SMALL_SALDO) AS TOO_SMALL_SALDO,
+    SUM(TOO_SMALL_OPL) AS TOO_SMALL_OPL,
+    AVG(RETURNED_DEBT_PERCENTAGE) AS AVG_RETURNED_DEBT_PERCENTAGE,
+FROM (SELECT DISTINCT
+    D.ELS_NKR AS ELS_NKR,
+    CASE
+        WHEN D.ELS_NKR IN (SELECT ELS_NKR FROM messages) AND D.STRATEGY_CODE == 'стратегия' THEN 'message' -- писали
+        WHEN D.ELS_NKR IN (SELECT ELS_NKR FROM calls) AND D.STRATEGY_CODE == 'стратегия' THEN 'call' -- звонили
+        WHEN D.STRATEGY_CODE == 'стратегия' THEN 'strategy_without_call_or_message' -- не звонили и не писали
+        WHEN D.STRATEGY_CODE == 'контрольная группа'
+            AND D.ELS_NKR NOT IN (SELECT ELS_NKR FROM messages)
+            AND D.ELS_NKR NOT IN (SELECT ELS_NKR FROM calls) THEN 'control' -- контрольная группа
+        ELSE 'control_but_call_or_message' -- контрольная группа, но звонили или писали, хотя не должны были
+    END AS STRATEGY_CODE,
+    D.SALDO_OUT AS SALDO_OUT,
+    CASE
+        WHEN D.SALDO_OUT BETWEEN 0 AND 1000 THEN '<1000'
+        WHEN D.SALDO_OUT BETWEEN 1000 AND 5000 THEN '1000-5000'
+        WHEN D.SALDO_OUT BETWEEN 5000 AND 15000 THEN '5000-15000'
+        WHEN D.SALDO_OUT BETWEEN 15000 AND 50000 THEN '15000-50000'
+        WHEN D.SALDO_OUT BETWEEN 50000 AND 100000 THEN '50000-100000'
+        WHEN D.SALDO_OUT BETWEEN 100000 AND 500000 THEN '100000-500000'
+        ELSE '>=500000'
+    END AS SALDO_SEGMENT,
+    (D.ELS_NKR IN (SELECT ELS_NKR FROM messages) AND D.SALDO_OUT <= 2)
+        OR (D.ELS_NKR IN (SELECT ELS_NKR FROM calls) AND D.SALDO_OUT <= 10) AS TOO_SMALL_SALDO, -- true, если задолженность меньше, чем цена сообщения или звонка
+    (D.ELS_NKR IN (SELECT ELS_NKR FROM messages) AND P.SUM_OPL <= 2)
+        OR (D.ELS_NKR IN (SELECT ELS_NKR FROM calls) AND P.SUM_OPL <= 10) AS TOO_SMALL_OPL, -- true, если сообщение или звонок не окупились за счет выплаты долга
+    CAST(COALESCE(P.SUM_OPL, 0) AS FLOAT) / CAST(D.SALDO_OUT AS FLOAT) * 100.0 AS RETURNED_DEBT_PERCENTAGE,
+    COALESCE(P.SUM_OPL, 0) AS SUM_OPL,
+    COALESCE(P.COUNT_OPL, 0) AS COUNT_OPL
+FROM debts AS D
+    LEFT JOIN
+    (SELECT ELS_NKR, SUM(SUM_OPL) AS SUM_OPL, COUNT(SUM_OPL) AS COUNT_OPL
+    FROM payments
+    GROUP BY ELS_NKR) AS P ON D.ELS_NKR == P.ELS_NKR
+)
+GROUP BY STRATEGY_CODE;
+ 
+-- STRATEGY_CODE - группа (контрольная / звонок / сообщение / те, кому должны были прислать сообщение или звонок, но не прислали и наоборот)
+-- ELS_NKR_COUNT - общее число лицевых счетов
+-- OPL_COUNT - общее число счетов, на которые оплачивали
+-- CONVERSION - отношение OPL_COUNT/ELS_NKR_COUNT*100%
+-- AVG_SALDO_OUT - среднее сальдо по группе
+-- AVG_SUM_OPL - сколько в среднем суммарно выплачивали долга
+-- AVG_COUNT_OPL - среднее количество выплат долга
+-- TOO_SMALL_SALDO - общее количество тех, кому звонили или писали, но долг был меньше, чем цена звонка/сообщения
+-- TOO_SMALL_OPL - общее количество тех, кому звонили или писали, но они вернули меньше, чем цена звонка/сообщения
+-- AVG_RETURNED_DEBT_PERCENTAGE - среднее отношение величины возвращенного долга к общей сумме долга
+ 
+-- в последний запрос еще можно добавить группировку по размеру долга (SALDO_SEGMENT),
+-- для этого в group by и в select добавить SALDO_SEGMENT
+
